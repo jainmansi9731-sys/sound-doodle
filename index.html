@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sound Doodle</title>
+<style>
+  :root{
+    --bg1:#1a1230;
+    --bg2:#0d0a1a;
+    --card:#150f28;
+    --line:#2c2450;
+    --text:#eee7ff;
+    --muted:#9a8fc4;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    min-height:100vh;
+    background: radial-gradient(circle at 20% 0%, var(--bg1), var(--bg2) 65%);
+    color:var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:28px 16px 40px;
+  }
+  h1{
+    margin:0 0 4px;
+    font-size:1.6rem;
+    letter-spacing:0.5px;
+    background:linear-gradient(90deg,#ff9ecf,#8ec5ff);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+  }
+  p.sub{
+    margin:0 0 20px;
+    color:var(--muted);
+    font-size:0.9rem;
+    text-align:center;
+    max-width:520px;
+  }
+  .toolbar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    align-items:center;
+    justify-content:center;
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:12px 18px;
+    margin-bottom:16px;
+    max-width:900px;
+  }
+  .colors{
+    display:flex;
+    gap:8px;
+  }
+  .swatch{
+    width:30px;
+    height:30px;
+    border-radius:50%;
+    border:2px solid rgba(255,255,255,0.15);
+    cursor:pointer;
+    transition:transform .12s ease, border-color .12s ease;
+  }
+  .swatch:hover{ transform:scale(1.08); }
+  .swatch.selected{
+    border-color:#fff;
+    transform:scale(1.15);
+    box-shadow:0 0 12px currentColor;
+  }
+  .group{
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+    font-size:0.72rem;
+    color:var(--muted);
+  }
+  .group label{ text-align:center; }
+  button{
+    font-family:inherit;
+    font-size:0.85rem;
+    border:1px solid var(--line);
+    background:#221a3d;
+    color:var(--text);
+    padding:8px 16px;
+    border-radius:9px;
+    cursor:pointer;
+    transition:background .12s ease, transform .12s ease;
+  }
+  button:hover{ background:#2c2350; }
+  button:active{ transform:scale(0.96); }
+  button.primary{
+    background:linear-gradient(90deg,#ff6b9d,#8b6bff);
+    border:none;
+    font-weight:600;
+    color:#100a1f;
+  }
+  button.primary:hover{ filter:brightness(1.08); }
+  .toggle{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    font-size:0.8rem;
+    color:var(--muted);
+    cursor:pointer;
+    user-select:none;
+  }
+  input[type=range]{ width:100px; accent-color:#ff6b9d; }
+  .stage{
+    position:relative;
+    width:100%;
+    max-width:900px;
+    border-radius:16px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    box-shadow:0 20px 60px rgba(0,0,0,0.45);
+    background:#fff;
+    touch-action:none;
+  }
+  canvas{
+    display:block;
+    width:100%;
+    height:auto;
+  }
+  #fx{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+  }
+  .hint{
+    margin-top:12px;
+    font-size:0.75rem;
+    color:var(--muted);
+    text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<h1>Sound Doodle</h1>
+<p class="sub">Draw a line — its height becomes pitch, its color becomes an instrument. Press Play and watch it sing back to you.</p>
+
+<div class="toolbar">
+  <div class="group">
+    <label>Instrument color</label>
+    <div class="colors" id="colors"></div>
+  </div>
+
+  <div class="group">
+    <label>Brush</label>
+    <input type="range" id="brush" min="2" max="16" value="7">
+  </div>
+
+  <div class="group">
+    <label>Tempo</label>
+    <input type="range" id="speed" min="1" max="10" value="5">
+  </div>
+
+  <div class="group">
+    <label>&nbsp;</label>
+    <label class="toggle"><input type="checkbox" id="liveSound" checked> live sound</label>
+  </div>
+
+  <div class="group">
+    <label>&nbsp;</label>
+    <label class="toggle"><input type="checkbox" id="loop"> loop</label>
+  </div>
+
+  <button class="primary" id="playBtn">▶ Play</button>
+  <button id="clearBtn">Clear</button>
+  <button id="saveBtn">Save PNG</button>
+</div>
+
+<div class="stage">
+  <canvas id="draw" width="1000" height="500"></canvas>
+  <canvas id="fx" width="1000" height="500"></canvas>
+</div>
+
+<p class="hint">high on the canvas = high pitch · low = deep bass · pick a new color for a different sound</p>
+
+<script>
+(function(){
+  const drawCanvas = document.getElementById('draw');
+  const fxCanvas = document.getElementById('fx');
+  const dctx = drawCanvas.getContext('2d');
+  const fctx = fxCanvas.getContext('2d');
+  const W = drawCanvas.width, H = drawCanvas.height;
+
+  const PALETTE = [
+    {name:'Coral',  hex:'#ff6b6b', wave:'sine',     octave:0},
+    {name:'Amber',  hex:'#ffb84d', wave:'triangle', octave:0},
+    {name:'Mint',   hex:'#4ade80', wave:'sine',     octave:1},
+    {name:'Sky',    hex:'#60a5fa', wave:'triangle', octave:-1},
+    {name:'Violet', hex:'#c084fc', wave:'sawtooth', octave:0},
+  ];
+  let colorIndex = 0;
+
+  const colorsEl = document.getElementById('colors');
+  PALETTE.forEach((c, i) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch' + (i === 0 ? ' selected' : '');
+    sw.style.background = c.hex;
+    sw.style.color = c.hex;
+    sw.title = c.name;
+    sw.addEventListener('click', () => {
+      colorIndex = i;
+      [...colorsEl.children].forEach(el => el.classList.remove('selected'));
+      sw.classList.add('selected');
+    });
+    colorsEl.appendChild(sw);
+  });
+
+  const ROOT = 130.81;
+  const DEGREES = [0,2,4,7,9];
+  const OCTAVE_SPAN = 4;
+  const SCALE = (() => {
+    const arr = [];
+    for (let o = 0; o < OCTAVE_SPAN; o++) {
+      for (const d of DEGREES) arr.push(ROOT * Math.pow(2, o + d/12));
+    }
+    return arr;
+  })();
+  function pitchForY(yNorm){
+    const idx = Math.max(0, Math.min(SCALE.length-1, Math.floor((1-yNorm) * (SCALE.length-1))));
+    return SCALE[idx];
+  }
+
+  let audioCtx = null, masterGain, delayNode, feedbackGain;
+  function ensureAudio(){
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.9;
+    delayNode = audioCtx.createDelay();
+    delayNode.delayTime.value = 0.22;
+    feedbackGain = audioCtx.createGain();
+    feedbackGain.gain.value = 0.22;
+    masterGain.connect(audioCtx.destination);
+    masterGain.connect(delayNode);
+    delayNode.connect(feedbackGain);
+    feedbackGain.connect(delayNode);
+    delayNode.connect(audioCtx.destination);
+  }
+  function playNote(freq, type, gain, dur){
+    ensureAudio();
+    const t = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    osc.type = type;
+    osc.frequency.value = freq;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g).connect(masterGain);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+
+  function paintBackground(){
+    dctx.fillStyle = '#fdfcff';
+    dctx.fillRect(0, 0, W, H);
+    dctx.strokeStyle = 'rgba(120,100,180,0.10)';
+    dctx.lineWidth = 1;
+    for (let i = 0; i <= SCALE.length; i += DEGREES.length) {
+      const y = H - (i / SCALE.length) * H;
+      dctx.beginPath();
+      dctx.moveTo(0, y);
+      dctx.lineTo(W, y);
+      dctx.stroke();
+    }
+    dctx.fillStyle = 'rgba(120,100,180,0.45)';
+    dctx.font = '12px sans-serif';
+    dctx.fillText('high pitch', 10, 16);
+    dctx.fillText('low pitch', 10, H - 8);
+  }
+  paintBackground();
+
+  const NUM_COLS = 240;
+  const COL_W = W / NUM_COLS;
+  let notePoints = [];
+  let buckets = null;
+
+  let isDrawing = false;
+  let lastX = 0, lastY = 0, lastCol = -1;
+
+  function getPos(e){
+    const rect = drawCanvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: (t.clientX - rect.left) / rect.width * W,
+      y: (t.clientY - rect.top) / rect.height * H,
+    };
+  }
+
+  function startStroke(e){
+    e.preventDefault();
+    ensureAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    isDrawing = true;
+    lastCol = -1;
+    const p = getPos(e);
+    lastX = p.x; lastY = p.y;
+    recordPoint(p.x, p.y);
+  }
+  function moveStroke(e){
+    if (!isDrawing) return;
+    e.preventDefault();
+    const p = getPos(e);
+    const c = PALETTE[colorIndex];
+    dctx.strokeStyle = c.hex;
+    dctx.lineWidth = +document.getElementById('brush').value;
+    dctx.lineCap = 'round';
+    dctx.lineJoin = 'round';
+    dctx.beginPath();
+    dctx.moveTo(lastX, lastY);
+    dctx.lineTo(p.x, p.y);
+    dctx.stroke();
+    lastX = p.x; lastY = p.y;
+    recordPoint(p.x, p.y);
+  }
+  function endStroke(){
+    isDrawing = false;
+    lastCol = -1;
+  }
+
+  function recordPoint(x, y){
+    const col = Math.max(0, Math.min(NUM_COLS - 1, Math.floor(x / W * NUM_COLS)));
+    if (col === lastCol) return;
+    lastCol = col;
+    const yNorm = Math.max(0, Math.min(1, y / H));
+    notePoints.push({ col, yNorm, colorIndex });
+    if (document.getElementById('liveSound').checked) {
+      const c = PALETTE[colorIndex];
+      const freq = pitchForY(yNorm) * Math.pow(2, c.octave);
+      playNote(freq, c.wave, 0.16, 0.35);
+    }
+  }
+
+  drawCanvas.addEventListener('mousedown', startStroke);
+  drawCanvas.addEventListener('mousemove', moveStroke);
+  window.addEventListener('mouseup', endStroke);
+  drawCanvas.addEventListener('touchstart', startStroke, {passive:false});
+  drawCanvas.addEventListener('touchmove', moveStroke, {passive:false});
+  drawCanvas.addEventListener('touchend', endStroke);
+
+  let particles = [];
+  function spawnParticle(x, y, color){
+    particles.push({ x, y, color, life: 1, r: 4 });
+  }
+  function renderFx(playheadX){
+    fctx.clearRect(0, 0, W, H);
+    if (playheadX !== null) {
+      fctx.strokeStyle = 'rgba(139,107,255,0.55)';
+      fctx.lineWidth = 2;
+      fctx.beginPath();
+      fctx.moveTo(playheadX, 0);
+      fctx.lineTo(playheadX, H);
+      fctx.stroke();
+    }
+    particles = particles.filter(p => p.life > 0);
+    for (const p of particles) {
+      fctx.globalAlpha = Math.max(0, p.life);
+      fctx.fillStyle = p.color;
+      fctx.beginPath();
+      fctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      fctx.fill();
+      p.life -= 0.035;
+      p.r += 0.7;
+    }
+    fctx.globalAlpha = 1;
+  }
+
+  let isPlaying = false, startTime = 0, playedCol = -1;
+  const playBtn = document.getElementById('playBtn');
+
+  function msPerColumn(){
+    const v = +document.getElementById('speed').value;
+    return 90 - (v - 1) * 8;
+  }
+
+  function tick(now){
+    if (!isPlaying) return;
+    const elapsed = now - startTime;
+    let currentCol = Math.floor(elapsed / msPerColumn());
+    if (currentCol >= NUM_COLS) {
+      if (document.getElementById('loop').checked) {
+        startTime = now;
+        playedCol = -1;
+        currentCol = 0;
+      } else {
+        stopPlayback();
+        return;
+      }
+    }
+    if (currentCol > playedCol) {
+      for (let c = playedCol + 1; c <= currentCol && c < NUM_COLS; c++) {
+        for (const p of buckets[c]) {
+          const clr = PALETTE[p.colorIndex];
+          const freq = pitchForY(p.yNorm) * Math.pow(2, clr.octave);
+          playNote(freq, clr.wave, 0.2, 0.5);
+          spawnParticle(c * COL_W, p.yNorm * H, clr.hex);
+        }
+      }
+      playedCol = currentCol;
+    }
+    renderFx(currentCol * COL_W);
+    requestAnimationFrame(tick);
+  }
+
+  function startPlayback(){
+    if (notePoints.length === 0) return;
+    ensureAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    buckets = Array.from({ length: NUM_COLS }, () => []);
+    for (const p of notePoints) buckets[p.col].push(p);
+    isPlaying = true;
+    playedCol = -1;
+    startTime = performance.now();
+    playBtn.textContent = '■ Stop';
+    requestAnimationFrame(tick);
+  }
+  function stopPlayback(){
+    isPlaying = false;
+    playBtn.textContent = '▶ Play';
+    fctx.clearRect(0, 0, W, H);
+  }
+
+  playBtn.addEventListener('click', () => {
+    if (isPlaying) stopPlayback();
+    else startPlayback();
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    stopPlayback();
+    notePoints = [];
+    particles = [];
+    paintBackground();
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.download = 'sound-doodle.png';
+    a.href = drawCanvas.toDataURL('image/png');
+    a.click();
+  });
+})();
+</script>
+</body>
+</html>
